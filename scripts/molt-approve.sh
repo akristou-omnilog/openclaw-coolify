@@ -3,7 +3,8 @@
 echo "🔎 Checking for pending device requests..."
 # Using full path to moltbot ensure it works regardless of shell
 MOLTBOT="/home/node/.npm-global/bin/moltbot"
-IDS=$($MOLTBOT devices list --json | jq -r '.pending[].id' 2>/dev/null)
+# Try multiple common keys for the request ID
+IDS=$($MOLTBOT devices list --json | jq -r '.pending[] | .requestId // .id // .request' 2>/dev/null | grep -v "null")
 
 if [ -z "$IDS" ]; then
   echo "✅ No pending requests found."
