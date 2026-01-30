@@ -152,8 +152,7 @@ services:
       - SEARXNG_URL=http://localhost:8888/
       - SEARXNG_SERVER_SECRET_KEY=${SERVICE_BASE64_SEARXNG}
       - SEARXNG_SEARCH_FORMATS=html,json
-    volumes:
-      - ./searxng:/etc/searxng
+
     cap_drop:
       - ALL
     cap_add:
