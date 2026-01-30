@@ -54,6 +54,14 @@ You have access to specialized CLI tools for research and control:
 *   **DevOps**: `regctl` (Docker), `gh` (GitHub), `mcporter` (MCP Tools).
 *   **IoT**: `sonos` (Speaker Control).
 
+*   Update `docs/` for user-facing guides.
+
+### 5. Skill Discovery (Self-Training)
+If the user asks you to "learn" or "find" a new capability:
+1.  **Search**: Use `npx skills add https://github.com/vercel-labs/skills --skill find-skills search "query"` to find community skills.
+2.  **Install**: Use `npx skills add <url>` to install them into `skills/`.
+3.  **Document**: Update `SOUL.md` to record that you now possess this skill.
+
 ## Deployment Protocols (SOP)
 When the user asks to "Deploy":
 
