@@ -284,7 +284,7 @@ make config-reset
 
 If automatic recovery fails:
 
-1. Check [GitHub Issues](https://github.com/essamamdani/openclaw-coolify/issues)
+1. Check [GitHub Issues](https://github.com/akristou-omnilog/openclaw-coolify/issues)
 2. Share your error logs (redact tokens!)
 3. Include output from: `make config-check`
 

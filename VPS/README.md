@@ -51,7 +51,7 @@ ssh root@VOTRE_IP_VPS
 ### 2. Télécharger le script
 
 ```bash
-git clone https://github.com/essamamdani/openclaw-coolify.git /tmp/openclaw-installer
+git clone https://github.com/akristou-omnilog/openclaw-coolify.git /tmp/openclaw-installer
 ```
 
 ### 3. Lancer l'installation
@@ -460,7 +460,7 @@ ssh root@YOUR_VPS_IP
 ### 2. Download the script
 
 ```bash
-git clone https://github.com/essamamdani/openclaw-coolify.git /tmp/openclaw-installer
+git clone https://github.com/akristou-omnilog/openclaw-coolify.git /tmp/openclaw-installer
 ```
 
 ### 3. Run the installation
