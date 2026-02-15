@@ -44,6 +44,10 @@ See [Venice AI](/providers/venice).
 - [Z.AI](/providers/zai)
 - [Xiaomi](/providers/xiaomi)
 - [GLM models](/providers/glm)
+- [Google Gemini (API key, Vertex, Gemini CLI)](/providers/gemini)
+- [Groq (LPU fast inference)](/providers/groq)
+- [Mistral AI](/providers/mistral)
+- [NVIDIA NIM](/providers/nvidia)
 - [MiniMax](/providers/minimax)
 - [Venius (Venice AI, privacy-focused)](/providers/venice)
 - [Ollama (local models)](/providers/ollama)
@@ -56,5 +60,5 @@ See [Venice AI](/providers/venice).
 
 - [Claude Max API Proxy](/providers/claude-max-api-proxy) - Use Claude Max/Pro subscription as an OpenAI-compatible API endpoint
 
-For the full provider catalog (xAI, Groq, Mistral, etc.) and advanced configuration,
+For the full provider catalog (xAI, Cerebras, etc.) and advanced configuration,
 see [Model providers](/concepts/model-providers).

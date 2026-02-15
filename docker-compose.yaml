@@ -67,6 +67,10 @@ services:
       OPENCLAW_AUTO_BOOTSTRAP: "1"
       OPENCLAW_PRINT_ACCESS: "1"
       GATEWAY_TRUSTED_PROXIES: '*'
+      # Emergency Recovery
+      # Set OPENCLAW_SAFE_MODE=1 to force config regeneration on startup
+      # Useful when config is corrupted and container won't start
+      OPENCLAW_SAFE_MODE: ${OPENCLAW_SAFE_MODE:-0}
       # Fix for EMFILE/Inotify issues in Docker
       CHOKIDAR_USEPOLLING: "true"
       # Public URL Access

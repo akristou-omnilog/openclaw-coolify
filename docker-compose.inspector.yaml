@@ -1,0 +1,43 @@
+# OpenClaw Config Inspector
+# Use this to access and edit openclaw.json when the main container won't start
+#
+# Usage:
+#   docker compose -f docker-compose.inspector.yaml up -d
+#   docker compose -f docker-compose.inspector.yaml exec inspector bash
+#   # Now you can edit /data/.openclaw/openclaw.json
+#   docker compose -f docker-compose.inspector.yaml down
+
+services:
+  inspector:
+    image: node:lts-bookworm-slim
+    container_name: openclaw-inspector
+    volumes:
+      # Mount the SAME volumes as main openclaw service
+      - openclaw-data:/data
+      - openclaw-config:/root/.openclaw
+      - openclaw-workspace:/root/openclaw-workspace
+      # Mount inspector script
+      - ./scripts/config-inspector.sh:/usr/local/bin/config-inspector
+    environment:
+      OPENCLAW_STATE_DIR: /data/.openclaw
+      OPENCLAW_WORKSPACE: /data/openclaw-workspace
+    working_dir: /data
+    command:
+      - bash
+      - -c
+      - |
+        apt-get update -qq && apt-get install -y -qq jq nano vim curl
+        chmod +x /usr/local/bin/config-inspector
+        echo ""
+        echo "=========================================="
+        echo "OpenClaw Config Inspector Ready"
+        echo "=========================================="
+        echo ""
+        echo "Run: config-inspector"
+        echo ""
+        sleep infinity
+    # Use the same volume definitions as main compose
+volumes:
+  openclaw-data:
+  openclaw-config:
+  openclaw-workspace:

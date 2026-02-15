@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find:*)",
+      "Bash(git -C /d/Repos/openclaw-coolify log --oneline -15)",
+      "Bash(git -C /d/Repos/openclaw-coolify remote -v)",
+      "Bash(ls:*)",
+      "Bash(wc:*)",
+      "Bash(xargs cat:*)",
+      "Bash(grep:*)"
+    ]
+  }
+}
