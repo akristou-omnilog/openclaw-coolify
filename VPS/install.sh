@@ -587,14 +587,18 @@ setup_crowdsec() {
     fi
 
     log_info "Installing CrowdSec (collaborative IPS)..."
+    # Add CrowdSec APT repository
     run_cmd bash -c 'curl -s https://install.crowdsec.net | bash'
-    run_cmd apt-get install -y -qq crowdsec-firewall-bouncer-iptables
+    # Install CrowdSec engine + firewall bouncer
+    run_cmd apt-get install -y -qq crowdsec crowdsec-firewall-bouncer-iptables
+    # Refresh command hash after install
+    hash -r
 
     # Install security collections
     log_info "Installing CrowdSec security collections..."
-    run_cmd cscli collections install crowdsecurity/linux
-    run_cmd cscli collections install crowdsecurity/sshd
-    run_cmd cscli collections install crowdsecurity/http-cve
+    run_cmd /usr/bin/cscli collections install crowdsecurity/linux
+    run_cmd /usr/bin/cscli collections install crowdsecurity/sshd
+    run_cmd /usr/bin/cscli collections install crowdsecurity/http-cve
 
     run_cmd systemctl enable crowdsec
     run_cmd systemctl restart crowdsec
