@@ -107,7 +107,7 @@ confirm() {
     fi
     local prompt="${1:-Continue?}"
     echo -en "${YELLOW}${prompt} [y/N]: ${NC}" >&2
-    read -r response
+    read -r response < /dev/tty
     [[ "$response" =~ ^[Yy]$ ]]
 }
 
@@ -126,7 +126,7 @@ prompt_value() {
     else
         echo -en "${BLUE}${prompt}${NC}: " >&2
     fi
-    read -r result
+    read -r result < /dev/tty
     echo "${result:-$default}"
 }
 
@@ -140,7 +140,7 @@ prompt_secret() {
     fi
 
     echo -en "${BLUE}${prompt}${NC} (Enter to skip): " >&2
-    read -rs result
+    read -rs result < /dev/tty
     echo "" >&2
     echo "$result"
 }
