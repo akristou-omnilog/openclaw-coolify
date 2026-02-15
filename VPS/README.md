@@ -219,6 +219,60 @@ sudo systemctl restart openclaw-gateway
 
 ---
 
+## Mise à jour
+
+### Mettre à jour le script d'installation
+
+Quand une nouvelle version du script est publiée, récupérez-la et relancez l'installation :
+
+```bash
+# Si le dépôt existe déjà
+cd /tmp/openclaw-installer && git pull
+
+# Sinon, cloner à nouveau
+git clone https://github.com/akristou-omnilog/openclaw-coolify.git /tmp/openclaw-installer
+```
+
+Puis relancez le script :
+
+```bash
+bash /tmp/openclaw-installer/VPS/install.sh
+```
+
+Le script est **idempotent** : il détecte ce qui est déjà installé et ne modifie que ce qui a changé. Vos données, clés API et configuration ne sont pas écrasées.
+
+### Mettre à jour OpenClaw
+
+Pour mettre à jour OpenClaw vers la dernière version :
+
+```bash
+# Mettre à jour le package
+sudo -u openclaw npm update -g openclaw@latest
+
+# Redémarrer le service
+sudo systemctl restart openclaw-gateway
+
+# Vérifier
+openclaw --version
+systemctl status openclaw-gateway
+```
+
+### Mettre à jour les composants système
+
+| Composant | Commande de mise à jour |
+|-----------|------------------------|
+| OpenClaw | `sudo -u openclaw npm update -g openclaw@latest` |
+| Node.js | `sudo apt-get update && sudo apt-get install -y nodejs` |
+| Caddy | `sudo apt-get update && sudo apt-get install -y caddy` |
+| CrowdSec | `sudo apt-get update && sudo apt-get install -y crowdsec` |
+| SearXNG | `docker pull searxng/searxng:latest && docker restart searxng` |
+| Images sandbox | `docker pull python:3.11-slim-bookworm && docker pull mcr.microsoft.com/playwright:v1.41.0-jammy` |
+| Paquets système | `sudo apt-get update && sudo apt-get upgrade -y` |
+
+> **Note :** Les mises à jour de sécurité système sont appliquées automatiquement via `unattended-upgrades`.
+
+---
+
 ## Commandes utiles
 
 | Action | Commande |
@@ -625,6 +679,60 @@ sudo systemctl restart openclaw-gateway
    sudo systemctl restart caddy
    ```
    Caddy automatically obtains a Let's Encrypt certificate.
+
+---
+
+## Updating
+
+### Update the installation script
+
+When a new version of the script is released, pull it and re-run the installation:
+
+```bash
+# If the repository already exists
+cd /tmp/openclaw-installer && git pull
+
+# Otherwise, clone it again
+git clone https://github.com/akristou-omnilog/openclaw-coolify.git /tmp/openclaw-installer
+```
+
+Then re-run the script:
+
+```bash
+bash /tmp/openclaw-installer/VPS/install.sh
+```
+
+The script is **idempotent**: it detects what is already installed and only modifies what has changed. Your data, API keys, and configuration are not overwritten.
+
+### Update OpenClaw
+
+To update OpenClaw to the latest version:
+
+```bash
+# Update the package
+sudo -u openclaw npm update -g openclaw@latest
+
+# Restart the service
+sudo systemctl restart openclaw-gateway
+
+# Verify
+openclaw --version
+systemctl status openclaw-gateway
+```
+
+### Update system components
+
+| Component | Update command |
+|-----------|---------------|
+| OpenClaw | `sudo -u openclaw npm update -g openclaw@latest` |
+| Node.js | `sudo apt-get update && sudo apt-get install -y nodejs` |
+| Caddy | `sudo apt-get update && sudo apt-get install -y caddy` |
+| CrowdSec | `sudo apt-get update && sudo apt-get install -y crowdsec` |
+| SearXNG | `docker pull searxng/searxng:latest && docker restart searxng` |
+| Sandbox images | `docker pull python:3.11-slim-bookworm && docker pull mcr.microsoft.com/playwright:v1.41.0-jammy` |
+| System packages | `sudo apt-get update && sudo apt-get upgrade -y` |
+
+> **Note:** System security updates are applied automatically via `unattended-upgrades`.
 
 ---
 

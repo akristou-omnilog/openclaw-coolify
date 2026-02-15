@@ -407,13 +407,13 @@ interactive_prompts() {
 update_system() {
     log_info "Updating system packages..."
     run_cmd apt-get update -qq
-    run_cmd DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq
+    run_cmd env DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq
     log_success "System packages updated"
 }
 
 install_base_packages() {
     log_info "Installing base packages..."
-    run_cmd DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+    run_cmd env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
         git curl wget ca-certificates gnupg lsb-release \
         apt-transport-https software-properties-common \
         build-essential python3 python3-pip python3-venv \
@@ -705,7 +705,7 @@ setup_aide() {
     fi
 
     log_info "Installing AIDE (file integrity monitoring)..."
-    run_cmd DEBIAN_FRONTEND=noninteractive apt-get install -y -qq aide
+    run_cmd env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq aide
 
     log_info "Initializing AIDE database (this may take a few minutes)..."
     run_cmd aideinit
@@ -764,7 +764,7 @@ setup_unattended_upgrades() {
     fi
 
     log_info "Configuring automatic security updates..."
-    run_cmd DEBIAN_FRONTEND=noninteractive dpkg-reconfigure -plow unattended-upgrades
+    run_cmd env DEBIAN_FRONTEND=noninteractive dpkg-reconfigure -plow unattended-upgrades
 
     run_cmd tee /etc/apt/apt.conf.d/52openclaw-upgrades > /dev/null <<'EOF'
 Unattended-Upgrade::Automatic-Reboot "false";
