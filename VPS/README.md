@@ -14,6 +14,7 @@
 VPS Hetzner
 ├── OpenClaw Gateway (natif, systemd)     ← Port 18789 (loopback)
 ├── Caddy reverse proxy (natif, systemd)  ← Port 80/443 (public)
+├── Git Versioning (inotify watcher)      ← Auto-commit config & mémoire
 ├── Docker Engine                          ← Sandboxes uniquement
 │   ├── Conteneurs sandbox (openclaw.managed=true)
 │   └── SearXNG (port 8080 loopback)
@@ -139,6 +140,9 @@ Le script exécute 5 phases séquentielles. Chaque fonction est **idempotente** 
 ### Phase 5 : Post-installation
 
 - Sauvegarde quotidienne automatique (2h, rétention 7 jours)
+- **Git versioning** pour configuration et mémoire (auto-commit sur /new, /reset)
+- **Service watcher** pour commits automatiques sur modification de fichiers
+- Scripts de rollback (`~/git-rollback.sh`) et statut (`~/git-memory-status.sh`)
 - Nettoyage Docker hebdomadaire
 - Script de vérification de sécurité
 - Rotation des logs
@@ -231,6 +235,56 @@ sudo systemctl restart openclaw-gateway
 | Statut SearXNG | `docker ps --filter name=searxng` |
 | Logs Caddy | `sudo journalctl -u caddy -f` |
 | Vérifier AIDE | `sudo aide --check` |
+
+---
+
+## Git Versioning (Configuration & Mémoire)
+
+Le script installe un système de versioning Git pour la configuration et la mémoire d'OpenClaw, permettant de revenir à une version stable en cas d'erreur.
+
+### Répertoires versionnés
+
+| Répertoire | Contenu | Exclusions |
+|------------|---------|------------|
+| `~/.openclaw/` | Configuration (openclaw.json) | credentials/, env, sessions/*.jsonl |
+| `~/.openclaw/workspace/` | Mémoire (MEMORY.md, SOUL.md, memory/) | node_modules/, .cache/ |
+
+### Commits automatiques
+
+- **Hook `git-memory-commit`** : commit automatique sur `/new` et `/reset`
+- **Service `openclaw-git-watcher`** : commit automatique sur modification de fichiers (debounce 30s)
+
+### Commandes Git
+
+| Action | Commande |
+|--------|----------|
+| Statut Git | `~/git-memory-status.sh` |
+| Rollback interactif | `~/git-rollback.sh` |
+| Lister commits config | `~/git-rollback.sh --list config` |
+| Lister commits mémoire | `~/git-rollback.sh --list workspace` |
+| Rollback config | `~/git-rollback.sh --rollback <hash> config` |
+| Rollback mémoire | `~/git-rollback.sh --rollback <hash> workspace` |
+| Voir diff | `~/git-rollback.sh --diff <hash> workspace` |
+| Logs watcher | `journalctl -u openclaw-git-watcher -f` |
+
+### Structure multi-agent
+
+```
+~/.openclaw/workspace/
+└── memory/
+    ├── agents/         # Mémoire privée par agent
+    │   └── main/
+    ├── shared/         # Mémoire partagée
+    │   ├── project/    # Architecture, roadmap
+    │   ├── users/      # Profils utilisateurs
+    │   ├── decisions/  # Décisions collectives
+    │   └── events/     # Événements inter-agents
+    └── archive/        # Anciennes mémoires
+```
+
+### Guide complet
+
+Voir `~/.openclaw/workspace/GIT_MEMORY.md` pour le guide détaillé de gestion multi-agent.
 
 ---
 
@@ -334,12 +388,17 @@ Chaque étape vérifie si elle a déjà été exécutée et saute automatiquemen
 | `/home/openclaw/.openclaw/openclaw.json` | Configuration du gateway OpenClaw |
 | `/home/openclaw/.openclaw/env` | Variables d'environnement (clés API) |
 | `/home/openclaw/.openclaw/workspace/` | Espace de travail des agents |
+| `/home/openclaw/.openclaw/workspace/GIT_MEMORY.md` | Guide Git multi-agent |
 | `/home/openclaw/.openclaw/credentials/` | Credentials des canaux |
 | `/home/openclaw/backup.sh` | Script de sauvegarde |
 | `/home/openclaw/security-check.sh` | Vérification de sécurité |
+| `/home/openclaw/git-rollback.sh` | Rollback Git (config/mémoire) |
+| `/home/openclaw/git-memory-status.sh` | Statut Git des repos |
+| `/home/openclaw/git-auto-commit.sh` | Script du watcher Git |
 | `/home/openclaw/install-summary.txt` | Résumé de l'installation (token) |
 | `/etc/caddy/Caddyfile` | Configuration du reverse proxy |
 | `/etc/systemd/system/openclaw-gateway.service` | Service systemd du gateway |
+| `/etc/systemd/system/openclaw-git-watcher.service` | Service watcher Git |
 | `/etc/sysctl.d/99-openclaw-hardening.conf` | Hardening kernel |
 | `/etc/ssh/sshd_config.d/99-openclaw-hardening.conf` | Hardening SSH |
 | `/etc/fail2ban/jail.local` | Configuration fail2ban |
@@ -364,6 +423,7 @@ Chaque étape vérifie si elle a déjà été exécutée et saute automatiquemen
 Hetzner VPS
 ├── OpenClaw Gateway (native, systemd)    ← Port 18789 (loopback)
 ├── Caddy reverse proxy (native, systemd) ← Port 80/443 (public)
+├── Git Versioning (inotify watcher)      ← Auto-commit config & memory
 ├── Docker Engine                          ← Sandboxes only
 │   ├── Sandbox containers (openclaw.managed=true)
 │   └── SearXNG (port 8080 loopback)
@@ -489,6 +549,9 @@ The script runs 5 sequential phases. Every function is **idempotent**: the scrip
 ### Phase 5: Post-Installation
 
 - Automatic daily backup (2 AM, 7-day retention)
+- **Git versioning** for configuration and memory (auto-commit on /new, /reset)
+- **File watcher service** for automatic commits on file changes
+- Rollback scripts (`~/git-rollback.sh`) and status (`~/git-memory-status.sh`)
 - Weekly Docker cleanup
 - Security check script
 - Log rotation
@@ -581,6 +644,56 @@ sudo systemctl restart openclaw-gateway
 | SearXNG status | `docker ps --filter name=searxng` |
 | Caddy logs | `sudo journalctl -u caddy -f` |
 | AIDE check | `sudo aide --check` |
+
+---
+
+## Git Versioning (Configuration & Memory)
+
+The script installs a Git versioning system for OpenClaw configuration and memory, allowing rollback to a stable version in case of errors.
+
+### Versioned Directories
+
+| Directory | Content | Exclusions |
+|-----------|---------|------------|
+| `~/.openclaw/` | Configuration (openclaw.json) | credentials/, env, sessions/*.jsonl |
+| `~/.openclaw/workspace/` | Memory (MEMORY.md, SOUL.md, memory/) | node_modules/, .cache/ |
+
+### Automatic Commits
+
+- **Hook `git-memory-commit`**: auto-commit on `/new` and `/reset` commands
+- **Service `openclaw-git-watcher`**: auto-commit on file changes (30s debounce)
+
+### Git Commands
+
+| Action | Command |
+|--------|----------|
+| Git status | `~/git-memory-status.sh` |
+| Interactive rollback | `~/git-rollback.sh` |
+| List config commits | `~/git-rollback.sh --list config` |
+| List memory commits | `~/git-rollback.sh --list workspace` |
+| Rollback config | `~/git-rollback.sh --rollback <hash> config` |
+| Rollback memory | `~/git-rollback.sh --rollback <hash> workspace` |
+| View diff | `~/git-rollback.sh --diff <hash> workspace` |
+| Watcher logs | `journalctl -u openclaw-git-watcher -f` |
+
+### Multi-Agent Structure
+
+```
+~/.openclaw/workspace/
+└── memory/
+    ├── agents/         # Private memory per agent
+    │   └── main/
+    ├── shared/         # Shared memory
+    │   ├── project/    # Architecture, roadmap
+    │   ├── users/      # User profiles
+    │   ├── decisions/  # Collective decisions
+    │   └── events/     # Inter-agent events
+    └── archive/        # Old memories
+```
+
+### Complete Guide
+
+See `~/.openclaw/workspace/GIT_MEMORY.md` for the detailed multi-agent management guide.
 
 ---
 
@@ -684,12 +797,17 @@ Each step checks whether it has already been completed and automatically skips i
 | `/home/openclaw/.openclaw/openclaw.json` | OpenClaw gateway configuration |
 | `/home/openclaw/.openclaw/env` | Environment variables (API keys) |
 | `/home/openclaw/.openclaw/workspace/` | Agent workspace |
+| `/home/openclaw/.openclaw/workspace/GIT_MEMORY.md` | Multi-agent Git guide |
 | `/home/openclaw/.openclaw/credentials/` | Channel credentials |
 | `/home/openclaw/backup.sh` | Backup script |
 | `/home/openclaw/security-check.sh` | Security check script |
+| `/home/openclaw/git-rollback.sh` | Git rollback (config/memory) |
+| `/home/openclaw/git-memory-status.sh` | Git repos status |
+| `/home/openclaw/git-auto-commit.sh` | Git watcher script |
 | `/home/openclaw/install-summary.txt` | Installation summary (token) |
 | `/etc/caddy/Caddyfile` | Reverse proxy configuration |
 | `/etc/systemd/system/openclaw-gateway.service` | Gateway systemd service |
+| `/etc/systemd/system/openclaw-git-watcher.service` | Git watcher service |
 | `/etc/sysctl.d/99-openclaw-hardening.conf` | Kernel hardening |
 | `/etc/ssh/sshd_config.d/99-openclaw-hardening.conf` | SSH hardening |
 | `/etc/fail2ban/jail.local` | fail2ban configuration |

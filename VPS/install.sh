@@ -5,11 +5,24 @@
 # Installs OpenClaw natively on a VPS with optimal security hardening.
 # Docker is used ONLY for sandbox environments and SearXNG.
 #
+# Features:
+#   - Full security hardening (UFW, CrowdSec, fail2ban, kernel sysctl)
+#   - Native OpenClaw installation with systemd service
+#   - Caddy reverse proxy with automatic HTTPS
+#   - Git versioning for config and memory (auto-commit on session events)
+#   - File watcher service for real-time commits
+#   - Rollback scripts for disaster recovery
+#
 # Usage:
 #   bash install.sh                              # Interactive mode
 #   bash install.sh --domain example.com         # With domain
 #   bash install.sh --non-interactive --domain example.com --email you@mail.com
 #   bash install.sh --dry-run                    # Preview only
+#
+# Post-install Git commands:
+#   ~/git-memory-status.sh                       # View Git status
+#   ~/git-rollback.sh                            # Rollback to previous version
+#   ~/git-rollback.sh --list workspace           # List memory commits
 #
 # Tested on: Ubuntu 22.04, Ubuntu 24.04, Debian 12
 # =============================================================================
@@ -246,6 +259,24 @@ show_help() {
     bash install.sh --domain my.example.com --email me@example.com
     bash install.sh --non-interactive --ssh-port 2222
     bash install.sh --dry-run
+
+  Features installed:
+    - Security: UFW, CrowdSec, fail2ban, kernel hardening, AIDE, auditd
+    - Services: OpenClaw Gateway (systemd), Caddy reverse proxy, SearXNG
+    - Docker: Sandbox images for isolated code execution
+    - Git versioning: Auto-commit config and memory on session events
+
+  Post-install commands:
+    ~/security-check.sh         Show security status
+    ~/backup.sh                 Manual backup
+    ~/git-memory-status.sh      Git versioning status
+    ~/git-rollback.sh           Rollback config/memory to previous commit
+    ~/git-rollback.sh --list    List recent commits
+
+  Git versioning:
+    Config (~/.openclaw/) and memory (~/.openclaw/workspace/) are versioned.
+    Auto-commit triggers: /new, /reset commands + file watcher service.
+    Guide: ~/.openclaw/workspace/GIT_MEMORY.md
 
 HELP
 }
@@ -1305,6 +1336,1041 @@ BACKUP
     log_success "Daily backup configured (2 AM, 7-day retention)"
 }
 
+setup_git_versioning() {
+    local user_home
+    user_home=$(eval echo ~"${OPENCLAW_USER}")
+    local openclaw_dir="${user_home}/.openclaw"
+    local workspace_dir="${openclaw_dir}/workspace"
+    local hooks_dir="${openclaw_dir}/hooks"
+
+    # Check if already configured
+    if [[ -d "${openclaw_dir}/.git" && -d "${workspace_dir}/.git" ]]; then
+        log_info "Git versioning already configured. Skipping."
+        return 0
+    fi
+
+    # Install inotify-tools for file watching
+    if ! is_installed inotifywait; then
+        log_info "Installing inotify-tools..."
+        run_cmd apt-get install -y -qq inotify-tools
+    fi
+
+    log_info "Configuring Git versioning for config and memory..."
+
+    # === 1. Initialize Git for Config Directory ===
+    if [[ ! -d "${openclaw_dir}/.git" ]]; then
+        log_info "Initializing Git repository for config..."
+        run_cmd sudo -u "${OPENCLAW_USER}" bash -c "cd '${openclaw_dir}' && git init"
+        run_cmd sudo -u "${OPENCLAW_USER}" bash -c "cd '${openclaw_dir}' && git config user.email 'agent@openclaw.local'"
+        run_cmd sudo -u "${OPENCLAW_USER}" bash -c "cd '${openclaw_dir}' && git config user.name 'OpenClaw-Agent'"
+
+        # Create .gitignore for config (exclude sensitive files)
+        run_cmd tee "${openclaw_dir}/.gitignore" > /dev/null <<'GITIGNORE'
+# OpenClaw Config Git Ignore
+# Security: Never version credentials or tokens
+
+# Sensitive directories
+credentials/
+.credentials/
+
+# Environment files with secrets
+env
+.env
+*.env
+
+# Session transcripts (may contain sensitive data)
+agents/*/sessions/*.jsonl
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*~
+
+# Logs
+*.log
+logs/
+
+# Cache
+.cache/
+node_modules/
+
+# OS files
+.DS_Store
+Thumbs.db
+GITIGNORE
+
+        run_cmd chown "${OPENCLAW_USER}:${OPENCLAW_USER}" "${openclaw_dir}/.gitignore"
+
+        # Initial commit for config
+        run_cmd sudo -u "${OPENCLAW_USER}" bash -c "cd '${openclaw_dir}' && git add -A && git commit -m 'Initial commit: OpenClaw configuration' --allow-empty"
+        log_success "Git repository initialized for config"
+    fi
+
+    # === 2. Initialize Git for Workspace (Memory) ===
+    if [[ ! -d "${workspace_dir}/.git" ]]; then
+        log_info "Initializing Git repository for workspace/memory..."
+        run_cmd sudo -u "${OPENCLAW_USER}" mkdir -p "${workspace_dir}"
+        run_cmd sudo -u "${OPENCLAW_USER}" bash -c "cd '${workspace_dir}' && git init"
+        run_cmd sudo -u "${OPENCLAW_USER}" bash -c "cd '${workspace_dir}' && git config user.email 'agent@openclaw.local'"
+        run_cmd sudo -u "${OPENCLAW_USER}" bash -c "cd '${workspace_dir}' && git config user.name 'OpenClaw-Agent'"
+
+        # Create multi-agent directory structure
+        run_cmd sudo -u "${OPENCLAW_USER}" mkdir -p "${workspace_dir}/memory/agents/main"
+        run_cmd sudo -u "${OPENCLAW_USER}" mkdir -p "${workspace_dir}/memory/shared/project"
+        run_cmd sudo -u "${OPENCLAW_USER}" mkdir -p "${workspace_dir}/memory/shared/users"
+        run_cmd sudo -u "${OPENCLAW_USER}" mkdir -p "${workspace_dir}/memory/shared/decisions"
+        run_cmd sudo -u "${OPENCLAW_USER}" mkdir -p "${workspace_dir}/memory/shared/events"
+        run_cmd sudo -u "${OPENCLAW_USER}" mkdir -p "${workspace_dir}/memory/archive"
+
+        # Create .gitignore for workspace
+        run_cmd tee "${workspace_dir}/.gitignore" > /dev/null <<'GITIGNORE'
+# OpenClaw Workspace Git Ignore
+
+# Dependencies
+node_modules/
+.npm/
+.bun/
+
+# Cache and temp
+.cache/
+*.tmp
+*.temp
+*.swp
+*~
+
+# Build outputs
+dist/
+build/
+out/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Large binary files
+*.zip
+*.tar.gz
+*.7z
+*.rar
+
+# Sandbox artifacts
+.sandbox/
+GITIGNORE
+
+        run_cmd chown "${OPENCLAW_USER}:${OPENCLAW_USER}" "${workspace_dir}/.gitignore"
+
+        # Initial commit for workspace
+        run_cmd sudo -u "${OPENCLAW_USER}" bash -c "cd '${workspace_dir}' && git add -A && git commit -m 'Initial commit: OpenClaw workspace with multi-agent structure' --allow-empty"
+        log_success "Git repository initialized for workspace"
+    fi
+
+    # === 3. Create GIT_MEMORY.md Guide ===
+    setup_git_memory_guide
+
+    # === 4. Create git-memory-commit Hook ===
+    setup_git_memory_hook
+
+    # === 5. Create Utility Scripts ===
+    setup_git_rollback_script
+    setup_git_status_script
+
+    # === 6. Setup File Watcher Service ===
+    setup_git_watcher_service
+
+    log_success "Git versioning configured (config + workspace)"
+}
+
+setup_git_memory_guide() {
+    local user_home
+    user_home=$(eval echo ~"${OPENCLAW_USER}")
+    local workspace_dir="${user_home}/.openclaw/workspace"
+    local guide_file="${workspace_dir}/GIT_MEMORY.md"
+
+    if [[ -f "$guide_file" ]]; then
+        log_info "GIT_MEMORY.md already exists. Skipping."
+        return 0
+    fi
+
+    log_info "Creating GIT_MEMORY.md guide..."
+    run_cmd tee "$guide_file" > /dev/null <<'GITMEMORY'
+# Configuration Git Memory - Eviter la Derive & Gestion Multi-Agent
+
+Tu es un assistant IA dans un ecosysteme multi-agents. Chaque agent a une memoire versionnee via Git, avec possibilite de partage, isolation, et synchronisation entre agents.
+
+---
+
+## Architecture de la Memoire
+
+### Structure des dossiers
+
+```
+~/.openclaw/
+├── .git/                    # Repo Git pour config
+├── openclaw.json            # Configuration (versionnee)
+└── workspace/
+    ├── .git/                # Repo Git pour memoire
+    ├── MEMORY.md            # Memoire long terme
+    ├── SOUL.md              # Persona agent
+    └── memory/
+        ├── agents/          # Memoire privee par agent
+        │   └── main/
+        ├── shared/          # Memoire partagee
+        │   ├── project/     # Architecture, roadmap
+        │   ├── users/       # Profils utilisateurs
+        │   ├── decisions/   # Decisions collectives
+        │   └── events/      # Evenements inter-agents
+        └── archive/         # Anciennes memoires
+```
+
+### Regles d'acces
+
+| Zone | Permissions | Usage |
+|------|-------------|-------|
+| `memory/agents/<moi>/` | **RW** (Lecture/Ecriture) | Ma memoire privee |
+| `memory/agents/<autre>/` | **R** (Lecture seule) | Consulter autres agents |
+| `memory/shared/` | **RW** (Tous) | Collaboration |
+| `memory/archive/` | **R** | Historique |
+
+---
+
+## Commandes Git Essentielles
+
+### Verifier le statut
+
+```bash
+# Statut de la config
+git -C ~/.openclaw status
+
+# Statut de la memoire/workspace
+git -C ~/.openclaw/workspace status
+
+# Ou utiliser le script:
+~/git-memory-status.sh
+```
+
+### Committer manuellement
+
+```bash
+# Config
+cd ~/.openclaw
+git add -A
+git commit -m "feat(config): Description du changement"
+
+# Memoire
+cd ~/.openclaw/workspace
+git add -A
+git commit -m "feat(memory): Description du changement"
+```
+
+### Voir l'historique
+
+```bash
+# Derniers commits config
+git -C ~/.openclaw log --oneline -10
+
+# Derniers commits memoire
+git -C ~/.openclaw/workspace log --oneline -10
+
+# Qui a change quoi?
+git -C ~/.openclaw/workspace log --format="%h %ai %an: %s" -10
+```
+
+### Comparer les versions
+
+```bash
+# Voir les differences depuis le dernier commit
+git -C ~/.openclaw/workspace diff
+
+# Voir un commit specifique
+git -C ~/.openclaw/workspace show <commit-hash>
+
+# Comparer deux commits
+git -C ~/.openclaw/workspace diff <commit1>..<commit2>
+```
+
+---
+
+## Rollback en Cas d'Erreur
+
+### Utiliser le script de rollback
+
+```bash
+# Lister les derniers commits (config)
+~/git-rollback.sh --list config
+
+# Lister les derniers commits (workspace/memoire)
+~/git-rollback.sh --list workspace
+
+# Rollback vers un commit specifique
+~/git-rollback.sh --rollback <commit-hash> config
+~/git-rollback.sh --rollback <commit-hash> workspace
+
+# Mode interactif
+~/git-rollback.sh
+```
+
+### Rollback manuel
+
+```bash
+# Annuler les changements non commites
+git -C ~/.openclaw/workspace checkout -- .
+
+# Revenir a un commit precedent (garde l'historique)
+git -C ~/.openclaw/workspace revert HEAD
+
+# Revenir a un commit specifique (ATTENTION: perd l'historique)
+git -C ~/.openclaw/workspace reset --hard <commit-hash>
+```
+
+---
+
+## Commits Automatiques
+
+### Hook sur /new et /reset
+
+Un hook est configure pour committer automatiquement quand tu utilises `/new` ou `/reset`.
+
+Le hook `git-memory-commit` :
+- Detecte les changements dans config et workspace
+- Cree un commit avec timestamp et contexte
+- Format: `auto(<timestamp>): Session <action>`
+
+### Watcher inotify (optionnel)
+
+Un service surveille les fichiers et commit automatiquement :
+
+```bash
+# Verifier le statut du watcher
+systemctl status openclaw-git-watcher
+
+# Activer/desactiver
+sudo systemctl enable openclaw-git-watcher
+sudo systemctl disable openclaw-git-watcher
+
+# Voir les logs
+journalctl -u openclaw-git-watcher -f
+```
+
+---
+
+## Communication Inter-Agents
+
+### Ecrire dans la memoire partagee
+
+```bash
+# Creer un fichier d'evenement
+cat > memory/shared/events/$(date +%s)-discovery.json <<EOF
+{
+  "timestamp": "$(date -Iseconds)",
+  "agent": "main",
+  "type": "discovery",
+  "summary": "Decouverte importante",
+  "ref": "memory/shared/users/alice.md"
+}
+EOF
+
+git add memory/shared/events/
+git commit -m "event(main): Nouvelle decouverte"
+```
+
+### Lire la memoire d'un autre agent
+
+```bash
+# Lire le journal d'un autre agent
+cat memory/agents/agent-2/journal/latest.md
+
+# Voir quand ca a ete modifie
+git log -1 --format="%ai %an: %s" memory/agents/agent-2/
+```
+
+---
+
+## Bonnes Pratiques
+
+1. **Commits frequents, petits changements** - Moins de risque de perte
+2. **Messages de commit descriptifs** - Facilite le rollback
+3. **Ne jamais committer de secrets** - Utiliser le fichier `env` (ignore par git)
+4. **Pull avant ecriture (si remote)** - Evite les conflits
+5. **Zone d'ecriture unique par agent** - Evite les conflits multi-agent
+
+---
+
+## Cheat Sheet
+
+```bash
+# === STATUT ===
+~/git-memory-status.sh              # Vue d'ensemble
+git -C ~/.openclaw status           # Config
+git -C ~/.openclaw/workspace status # Memoire
+
+# === HISTORIQUE ===
+git -C ~/.openclaw/workspace log --oneline -10
+git -C ~/.openclaw/workspace blame <fichier>
+
+# === ROLLBACK ===
+~/git-rollback.sh                   # Mode interactif
+~/git-rollback.sh --list workspace  # Lister commits
+~/git-rollback.sh --rollback <hash> workspace
+
+# === COMMIT MANUEL ===
+cd ~/.openclaw/workspace && git add -A && git commit -m "message"
+
+# === DIFFSFERENCES ===
+git -C ~/.openclaw/workspace diff
+git -C ~/.openclaw/workspace show HEAD
+
+# === WATCHER ===
+systemctl status openclaw-git-watcher
+journalctl -u openclaw-git-watcher -f
+```
+GITMEMORY
+
+    run_cmd chown "${OPENCLAW_USER}:${OPENCLAW_USER}" "$guide_file"
+    log_success "GIT_MEMORY.md guide created"
+}
+
+setup_git_memory_hook() {
+    local user_home
+    user_home=$(eval echo ~"${OPENCLAW_USER}")
+    local hooks_dir="${user_home}/.openclaw/hooks"
+    local hook_dir="${hooks_dir}/git-memory-commit"
+
+    if [[ -d "$hook_dir" ]]; then
+        log_info "git-memory-commit hook already exists. Skipping."
+        return 0
+    fi
+
+    log_info "Creating git-memory-commit hook..."
+    run_cmd sudo -u "${OPENCLAW_USER}" mkdir -p "$hook_dir"
+
+    # Create HOOK.md
+    run_cmd tee "${hook_dir}/HOOK.md" > /dev/null <<'HOOKMD'
+---
+name: git-memory-commit
+description: "Auto-commit config and memory changes on session events"
+metadata: {"openclaw":{"emoji":"📝","events":["command:new","command:reset"],"requires":{"bins":["git"]}}}
+---
+
+# Git Memory Commit Hook
+
+Automatically commits changes to the configuration and workspace repositories when session events occur (`/new`, `/reset`).
+
+## What It Does
+
+1. Checks for uncommitted changes in `~/.openclaw/` (config)
+2. Checks for uncommitted changes in `~/.openclaw/workspace/` (memory)
+3. Creates commits with descriptive messages including timestamp and action
+4. Runs silently in the background
+
+## Commit Format
+
+```
+auto(<YYYY-MM-DD HH:MM>): Session <action> - <context>
+```
+
+## Configuration
+
+No configuration needed. The hook is enabled by default.
+
+## Requirements
+
+- Git must be installed
+- Git repositories must be initialized (done by install.sh)
+HOOKMD
+
+    # Create handler.ts
+    run_cmd tee "${hook_dir}/handler.ts" > /dev/null <<'HANDLERTS'
+import type { HookHandler } from '../../src/hooks/hooks.js';
+import { execSync } from 'child_process';
+import { existsSync } from 'fs';
+import { homedir } from 'os';
+import { join } from 'path';
+
+const handler: HookHandler = async (event) => {
+  // Only trigger on 'new' or 'reset' commands
+  if (event.type !== 'command') return;
+  if (event.action !== 'new' && event.action !== 'reset') return;
+
+  const home = homedir();
+  const configDir = process.env.OPENCLAW_STATE_DIR || join(home, '.openclaw');
+  const workspaceDir = process.env.OPENCLAW_WORKSPACE || join(configDir, 'workspace');
+
+  const timestamp = new Date().toISOString().slice(0, 16).replace('T', ' ');
+  const action = event.action;
+
+  // Helper to run git commands
+  const gitCommit = (dir: string, type: string) => {
+    if (!existsSync(join(dir, '.git'))) return false;
+
+    try {
+      // Check if there are changes
+      const status = execSync('git status --porcelain', { cwd: dir, encoding: 'utf8' });
+      if (!status.trim()) return false;
+
+      // Stage and commit
+      execSync('git add -A', { cwd: dir });
+      const message = `auto(${timestamp}): Session ${action} - ${type} snapshot`;
+      execSync(`git commit -m "${message}"`, { cwd: dir });
+      return true;
+    } catch (e) {
+      // Silently fail - don't interrupt the user
+      console.error(`[git-memory-commit] Error committing ${type}:`, e);
+      return false;
+    }
+  };
+
+  // Commit config changes
+  const configCommitted = gitCommit(configDir, 'config');
+
+  // Commit workspace/memory changes
+  const workspaceCommitted = gitCommit(workspaceDir, 'memory');
+
+  // Optional: notify user (silent by default)
+  if (configCommitted || workspaceCommitted) {
+    const parts = [];
+    if (configCommitted) parts.push('config');
+    if (workspaceCommitted) parts.push('memory');
+    // Uncomment to notify user:
+    // event.messages.push(`📝 Git commit: ${parts.join(' + ')}`);
+  }
+};
+
+export default handler;
+HANDLERTS
+
+    run_cmd chown -R "${OPENCLAW_USER}:${OPENCLAW_USER}" "$hook_dir"
+    log_success "git-memory-commit hook created"
+
+    # Enable the hook
+    log_info "Enabling git-memory-commit hook..."
+    run_cmd sudo -u "${OPENCLAW_USER}" bash -c "openclaw hooks enable git-memory-commit 2>/dev/null || true"
+}
+
+setup_git_rollback_script() {
+    local user_home
+    user_home=$(eval echo ~"${OPENCLAW_USER}")
+    local script_path="${user_home}/git-rollback.sh"
+
+    if [[ -f "$script_path" ]]; then
+        log_info "git-rollback.sh already exists. Skipping."
+        return 0
+    fi
+
+    log_info "Creating git-rollback.sh script..."
+    run_cmd tee "$script_path" > /dev/null <<'ROLLBACK'
+#!/bin/bash
+# =============================================================================
+# OpenClaw Git Rollback Script
+# =============================================================================
+# Safely rollback configuration or memory to a previous Git commit.
+#
+# Usage:
+#   ./git-rollback.sh                           # Interactive mode
+#   ./git-rollback.sh --list config             # List config commits
+#   ./git-rollback.sh --list workspace          # List workspace commits
+#   ./git-rollback.sh --rollback <hash> config  # Rollback config
+#   ./git-rollback.sh --rollback <hash> workspace # Rollback workspace
+#   ./git-rollback.sh --diff <hash> config      # Show diff
+# =============================================================================
+set -euo pipefail
+
+# Colors
+BOLD='\033[1m'
+GREEN='\033[38;2;47;191;113m'
+YELLOW='\033[38;2;255;176;32m'
+RED='\033[38;2;226;61;45m'
+CYAN='\033[38;2;0;200;200m'
+NC='\033[0m'
+
+# Directories
+OPENCLAW_DIR="${OPENCLAW_STATE_DIR:-$HOME/.openclaw}"
+WORKSPACE_DIR="${OPENCLAW_WORKSPACE:-$OPENCLAW_DIR/workspace}"
+
+get_repo_dir() {
+    local target="$1"
+    case "$target" in
+        config) echo "$OPENCLAW_DIR" ;;
+        workspace|memory) echo "$WORKSPACE_DIR" ;;
+        *) echo ""; return 1 ;;
+    esac
+}
+
+list_commits() {
+    local target="$1"
+    local count="${2:-15}"
+    local repo_dir
+    repo_dir=$(get_repo_dir "$target")
+
+    if [[ -z "$repo_dir" || ! -d "$repo_dir/.git" ]]; then
+        echo -e "${RED}Error: Invalid target or Git not initialized for '$target'${NC}"
+        return 1
+    fi
+
+    echo ""
+    echo -e "${BOLD}${CYAN}Last $count commits for $target ($repo_dir):${NC}"
+    echo ""
+    git -C "$repo_dir" log --oneline --decorate -n "$count" --format="%C(yellow)%h%C(reset) %C(cyan)%ad%C(reset) %s" --date=short
+    echo ""
+}
+
+show_diff() {
+    local commit="$1"
+    local target="$2"
+    local repo_dir
+    repo_dir=$(get_repo_dir "$target")
+
+    if [[ -z "$repo_dir" || ! -d "$repo_dir/.git" ]]; then
+        echo -e "${RED}Error: Invalid target or Git not initialized${NC}"
+        return 1
+    fi
+
+    echo ""
+    echo -e "${BOLD}${CYAN}Changes in commit $commit:${NC}"
+    echo ""
+    git -C "$repo_dir" show "$commit" --stat
+    echo ""
+    git -C "$repo_dir" show "$commit" --no-stat
+}
+
+do_rollback() {
+    local commit="$1"
+    local target="$2"
+    local repo_dir
+    repo_dir=$(get_repo_dir "$target")
+
+    if [[ -z "$repo_dir" || ! -d "$repo_dir/.git" ]]; then
+        echo -e "${RED}Error: Invalid target or Git not initialized${NC}"
+        return 1
+    fi
+
+    # Verify commit exists
+    if ! git -C "$repo_dir" rev-parse --verify "$commit" >/dev/null 2>&1; then
+        echo -e "${RED}Error: Commit '$commit' not found${NC}"
+        return 1
+    fi
+
+    echo ""
+    echo -e "${YELLOW}WARNING: This will rollback $target to commit $commit${NC}"
+    echo ""
+
+    # Show what will change
+    echo -e "${BOLD}Files that will be restored:${NC}"
+    git -C "$repo_dir" diff --stat "$commit"..HEAD
+    echo ""
+
+    # Confirm
+    echo -en "${YELLOW}Proceed with rollback? [y/N]: ${NC}"
+    read -r response
+    if [[ ! "$response" =~ ^[Yy]$ ]]; then
+        echo -e "${CYAN}Rollback cancelled.${NC}"
+        return 0
+    fi
+
+    # Create safety branch
+    local backup_branch="backup-$(date +%Y%m%d-%H%M%S)"
+    echo -e "${CYAN}Creating backup branch: $backup_branch${NC}"
+    git -C "$repo_dir" branch "$backup_branch"
+
+    # Perform rollback
+    echo -e "${CYAN}Rolling back to $commit...${NC}"
+    git -C "$repo_dir" checkout "$commit" -- .
+    git -C "$repo_dir" add -A
+    git -C "$repo_dir" commit -m "rollback: Reverted to $commit (backup: $backup_branch)"
+
+    echo ""
+    echo -e "${GREEN}Rollback complete!${NC}"
+    echo -e "Backup branch created: ${CYAN}$backup_branch${NC}"
+    echo -e "To undo this rollback: ${CYAN}git -C $repo_dir checkout $backup_branch -- .${NC}"
+    echo ""
+
+    # Restart gateway if config changed
+    if [[ "$target" == "config" ]]; then
+        echo -e "${YELLOW}Config changed. You may need to restart the gateway:${NC}"
+        echo -e "  ${CYAN}sudo systemctl restart openclaw-gateway${NC}"
+    fi
+}
+
+interactive_mode() {
+    echo ""
+    echo -e "${BOLD}${CYAN}=====================================${NC}"
+    echo -e "${BOLD}${CYAN}  OpenClaw Git Rollback Tool${NC}"
+    echo -e "${BOLD}${CYAN}=====================================${NC}"
+    echo ""
+
+    # Select target
+    echo -e "${BOLD}Select target:${NC}"
+    echo "  1) config    - OpenClaw configuration (~/.openclaw/)"
+    echo "  2) workspace - Memory and workspace (~/.openclaw/workspace/)"
+    echo ""
+    echo -en "${CYAN}Choice [1-2]: ${NC}"
+    read -r choice
+
+    local target=""
+    case "$choice" in
+        1) target="config" ;;
+        2) target="workspace" ;;
+        *)
+            echo -e "${RED}Invalid choice${NC}"
+            exit 1
+            ;;
+    esac
+
+    # List commits
+    list_commits "$target" 15
+
+    # Ask for action
+    echo -e "${BOLD}Actions:${NC}"
+    echo "  1) Rollback to a commit"
+    echo "  2) View diff of a commit"
+    echo "  3) Exit"
+    echo ""
+    echo -en "${CYAN}Choice [1-3]: ${NC}"
+    read -r action
+
+    case "$action" in
+        1)
+            echo -en "${CYAN}Enter commit hash: ${NC}"
+            read -r commit
+            do_rollback "$commit" "$target"
+            ;;
+        2)
+            echo -en "${CYAN}Enter commit hash: ${NC}"
+            read -r commit
+            show_diff "$commit" "$target"
+            ;;
+        3)
+            echo "Bye!"
+            exit 0
+            ;;
+        *)
+            echo -e "${RED}Invalid choice${NC}"
+            exit 1
+            ;;
+    esac
+}
+
+show_help() {
+    cat <<'HELP'
+
+  OpenClaw Git Rollback Tool
+
+  Usage:
+    ./git-rollback.sh                           # Interactive mode
+    ./git-rollback.sh --list <target>           # List commits
+    ./git-rollback.sh --rollback <hash> <target># Rollback to commit
+    ./git-rollback.sh --diff <hash> <target>    # Show commit diff
+
+  Targets:
+    config      ~/.openclaw/ (configuration)
+    workspace   ~/.openclaw/workspace/ (memory)
+
+  Examples:
+    ./git-rollback.sh --list config
+    ./git-rollback.sh --list workspace
+    ./git-rollback.sh --rollback abc123 config
+    ./git-rollback.sh --diff abc123 workspace
+
+HELP
+}
+
+# Main
+case "${1:-}" in
+    --list)
+        list_commits "${2:-config}" "${3:-15}"
+        ;;
+    --rollback)
+        if [[ -z "${2:-}" || -z "${3:-}" ]]; then
+            echo -e "${RED}Usage: ./git-rollback.sh --rollback <hash> <target>${NC}"
+            exit 1
+        fi
+        do_rollback "$2" "$3"
+        ;;
+    --diff)
+        if [[ -z "${2:-}" || -z "${3:-}" ]]; then
+            echo -e "${RED}Usage: ./git-rollback.sh --diff <hash> <target>${NC}"
+            exit 1
+        fi
+        show_diff "$2" "$3"
+        ;;
+    --help|-h)
+        show_help
+        ;;
+    "")
+        interactive_mode
+        ;;
+    *)
+        echo -e "${RED}Unknown option: $1${NC}"
+        show_help
+        exit 1
+        ;;
+esac
+ROLLBACK
+
+    run_cmd chown "${OPENCLAW_USER}:${OPENCLAW_USER}" "$script_path"
+    run_cmd chmod 755 "$script_path"
+    log_success "git-rollback.sh created"
+}
+
+setup_git_status_script() {
+    local user_home
+    user_home=$(eval echo ~"${OPENCLAW_USER}")
+    local script_path="${user_home}/git-memory-status.sh"
+
+    if [[ -f "$script_path" ]]; then
+        log_info "git-memory-status.sh already exists. Skipping."
+        return 0
+    fi
+
+    log_info "Creating git-memory-status.sh script..."
+    run_cmd tee "$script_path" > /dev/null <<'GITSTATUS'
+#!/bin/bash
+# =============================================================================
+# OpenClaw Git Memory Status
+# =============================================================================
+# Display Git status for both config and workspace repositories.
+# =============================================================================
+
+# Colors
+BOLD='\033[1m'
+GREEN='\033[38;2;47;191;113m'
+YELLOW='\033[38;2;255;176;32m'
+RED='\033[38;2;226;61;45m'
+CYAN='\033[38;2;0;200;200m'
+MUTED='\033[38;2;139;127;119m'
+NC='\033[0m'
+
+OPENCLAW_DIR="${OPENCLAW_STATE_DIR:-$HOME/.openclaw}"
+WORKSPACE_DIR="${OPENCLAW_WORKSPACE:-$OPENCLAW_DIR/workspace}"
+
+echo ""
+echo -e "${BOLD}${CYAN}========================================${NC}"
+echo -e "${BOLD}${CYAN}  OpenClaw Git Memory Status${NC}"
+echo -e "${BOLD}${CYAN}========================================${NC}"
+echo ""
+
+# === Config Repository ===
+echo -e "${BOLD}CONFIG${NC} (${MUTED}${OPENCLAW_DIR}${NC})"
+echo -e "${MUTED}────────────────────────────────────────${NC}"
+
+if [[ -d "$OPENCLAW_DIR/.git" ]]; then
+    cd "$OPENCLAW_DIR"
+
+    # Status
+    changes=$(git status --porcelain 2>/dev/null | wc -l)
+    if [[ "$changes" -eq 0 ]]; then
+        echo -e "  Status: ${GREEN}Clean${NC}"
+    else
+        echo -e "  Status: ${YELLOW}$changes uncommitted change(s)${NC}"
+        git status --porcelain 2>/dev/null | head -5 | while read -r line; do
+            echo -e "    ${MUTED}$line${NC}"
+        done
+        if [[ "$changes" -gt 5 ]]; then
+            echo -e "    ${MUTED}... and $((changes - 5)) more${NC}"
+        fi
+    fi
+
+    # Last commit
+    echo -e "  Last commit:"
+    git log -1 --format="    %C(yellow)%h%C(reset) %C(cyan)%ad%C(reset) %s" --date=short 2>/dev/null || echo "    (none)"
+
+    # Total commits
+    total=$(git rev-list --count HEAD 2>/dev/null || echo "0")
+    echo -e "  Total commits: ${CYAN}$total${NC}"
+else
+    echo -e "  ${RED}Git not initialized${NC}"
+fi
+
+echo ""
+
+# === Workspace Repository ===
+echo -e "${BOLD}WORKSPACE/MEMORY${NC} (${MUTED}${WORKSPACE_DIR}${NC})"
+echo -e "${MUTED}────────────────────────────────────────${NC}"
+
+if [[ -d "$WORKSPACE_DIR/.git" ]]; then
+    cd "$WORKSPACE_DIR"
+
+    # Status
+    changes=$(git status --porcelain 2>/dev/null | wc -l)
+    if [[ "$changes" -eq 0 ]]; then
+        echo -e "  Status: ${GREEN}Clean${NC}"
+    else
+        echo -e "  Status: ${YELLOW}$changes uncommitted change(s)${NC}"
+        git status --porcelain 2>/dev/null | head -5 | while read -r line; do
+            echo -e "    ${MUTED}$line${NC}"
+        done
+        if [[ "$changes" -gt 5 ]]; then
+            echo -e "    ${MUTED}... and $((changes - 5)) more${NC}"
+        fi
+    fi
+
+    # Last commit
+    echo -e "  Last commit:"
+    git log -1 --format="    %C(yellow)%h%C(reset) %C(cyan)%ad%C(reset) %s" --date=short 2>/dev/null || echo "    (none)"
+
+    # Total commits
+    total=$(git rev-list --count HEAD 2>/dev/null || echo "0")
+    echo -e "  Total commits: ${CYAN}$total${NC}"
+
+    # Recent activity
+    echo -e "  Recent activity (last 5):"
+    git log --oneline -5 --format="    %C(yellow)%h%C(reset) %s" 2>/dev/null || echo "    (none)"
+else
+    echo -e "  ${RED}Git not initialized${NC}"
+fi
+
+echo ""
+
+# === Watcher Service ===
+echo -e "${BOLD}GIT WATCHER SERVICE${NC}"
+echo -e "${MUTED}────────────────────────────────────────${NC}"
+if systemctl is-active openclaw-git-watcher &>/dev/null; then
+    echo -e "  Status: ${GREEN}Running${NC}"
+else
+    if systemctl is-enabled openclaw-git-watcher &>/dev/null 2>&1; then
+        echo -e "  Status: ${YELLOW}Stopped (enabled)${NC}"
+    else
+        echo -e "  Status: ${MUTED}Disabled${NC}"
+    fi
+fi
+
+echo ""
+echo -e "${MUTED}Commands:${NC}"
+echo -e "  ${CYAN}~/git-rollback.sh${NC}          - Rollback to previous version"
+echo -e "  ${CYAN}~/git-rollback.sh --list${NC}   - List recent commits"
+echo ""
+GITSTATUS
+
+    run_cmd chown "${OPENCLAW_USER}:${OPENCLAW_USER}" "$script_path"
+    run_cmd chmod 755 "$script_path"
+    log_success "git-memory-status.sh created"
+}
+
+setup_git_watcher_service() {
+    local user_home
+    user_home=$(eval echo ~"${OPENCLAW_USER}")
+    local service_file="/etc/systemd/system/openclaw-git-watcher.service"
+    local script_path="${user_home}/git-auto-commit.sh"
+
+    if [[ -f "$service_file" ]]; then
+        log_info "Git watcher service already exists. Skipping."
+        return 0
+    fi
+
+    log_info "Creating Git auto-commit watcher..."
+
+    # Create the watcher script
+    run_cmd tee "$script_path" > /dev/null <<'WATCHER'
+#!/bin/bash
+# =============================================================================
+# OpenClaw Git Auto-Commit Watcher
+# =============================================================================
+# Watches for file changes and commits automatically with debounce.
+# =============================================================================
+set -euo pipefail
+
+OPENCLAW_DIR="${OPENCLAW_STATE_DIR:-$HOME/.openclaw}"
+WORKSPACE_DIR="${OPENCLAW_WORKSPACE:-$OPENCLAW_DIR/workspace}"
+DEBOUNCE_SECONDS=30
+LAST_COMMIT_CONFIG=0
+LAST_COMMIT_WORKSPACE=0
+
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
+}
+
+commit_if_changes() {
+    local dir="$1"
+    local type="$2"
+    local last_var="$3"
+    local now
+    now=$(date +%s)
+
+    # Check debounce
+    local last_commit=${!last_var}
+    if (( now - last_commit < DEBOUNCE_SECONDS )); then
+        return 0
+    fi
+
+    # Check if git repo exists
+    if [[ ! -d "$dir/.git" ]]; then
+        return 0
+    fi
+
+    # Check for changes
+    cd "$dir"
+    local changes
+    changes=$(git status --porcelain 2>/dev/null | wc -l)
+    if [[ "$changes" -eq 0 ]]; then
+        return 0
+    fi
+
+    # Commit
+    local timestamp
+    timestamp=$(date '+%Y-%m-%d %H:%M')
+    git add -A
+    git commit -m "auto(${timestamp}): File change detected - ${type}" >/dev/null 2>&1 || true
+
+    log "Committed $changes change(s) to $type"
+
+    # Update last commit time
+    eval "$last_var=$now"
+}
+
+log "Git watcher started"
+log "Watching: $OPENCLAW_DIR (config)"
+log "Watching: $WORKSPACE_DIR (workspace)"
+log "Debounce: ${DEBOUNCE_SECONDS}s"
+
+# Watch both directories
+inotifywait -m -r \
+    --exclude '(\.git|node_modules|\.cache|\.swp|\.tmp)' \
+    -e modify,create,delete,move \
+    "$OPENCLAW_DIR" "$WORKSPACE_DIR" 2>/dev/null |
+while read -r directory event filename; do
+    # Skip .git directory events
+    if [[ "$directory" == *".git"* ]]; then
+        continue
+    fi
+
+    # Determine which repo changed
+    if [[ "$directory" == "$WORKSPACE_DIR"* ]]; then
+        commit_if_changes "$WORKSPACE_DIR" "workspace" "LAST_COMMIT_WORKSPACE"
+    else
+        commit_if_changes "$OPENCLAW_DIR" "config" "LAST_COMMIT_CONFIG"
+    fi
+done
+WATCHER
+
+    run_cmd chown "${OPENCLAW_USER}:${OPENCLAW_USER}" "$script_path"
+    run_cmd chmod 755 "$script_path"
+
+    # Create systemd service
+    run_cmd tee "$service_file" > /dev/null <<EOF
+[Unit]
+Description=OpenClaw Git Auto-Commit Watcher
+After=network.target openclaw-gateway.service
+
+[Service]
+Type=simple
+User=${OPENCLAW_USER}
+Group=${OPENCLAW_USER}
+Environment="OPENCLAW_STATE_DIR=${user_home}/.openclaw"
+Environment="OPENCLAW_WORKSPACE=${user_home}/.openclaw/workspace"
+ExecStart=${script_path}
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    run_cmd systemctl daemon-reload
+    run_cmd systemctl enable openclaw-git-watcher
+    run_cmd systemctl start openclaw-git-watcher
+    log_success "Git watcher service created and started"
+}
+
 setup_docker_cleanup() {
     local cron_file="/etc/cron.d/openclaw-docker-cleanup"
     if [[ -f "$cron_file" ]]; then
@@ -1542,6 +2608,7 @@ display_summary() {
     fi
     echo -e "    ${GREEN}[OK]${NC} Systemd hardening      (NoNewPrivileges, ProtectSystem)"
     echo -e "    ${GREEN}[OK]${NC} Metadata blocked       (169.254.169.254)"
+    echo -e "    ${GREEN}[OK]${NC} Git versioning         (config + memory auto-commit)"
     echo ""
     echo -e "  ${BOLD}COMMANDES UTILES${NC}"
     echo -e "    Statut securite :  ${CYAN}sudo ${user_home}/security-check.sh${NC}"
@@ -1550,6 +2617,12 @@ display_summary() {
     echo -e "    Backup manuel :    ${CYAN}${user_home}/backup.sh${NC}"
     echo -e "    Logs CrowdSec :    ${CYAN}sudo cscli alerts list${NC}"
     echo -e "    IPs bannies :      ${CYAN}sudo cscli decisions list${NC}"
+    echo ""
+    echo -e "  ${BOLD}GIT VERSIONING${NC}"
+    echo -e "    Statut Git :       ${CYAN}${user_home}/git-memory-status.sh${NC}"
+    echo -e "    Rollback :         ${CYAN}${user_home}/git-rollback.sh${NC}"
+    echo -e "    Guide :            ${CYAN}${user_home}/.openclaw/workspace/GIT_MEMORY.md${NC}"
+    echo -e "    Watcher logs :     ${CYAN}journalctl -u openclaw-git-watcher -f${NC}"
     echo ""
     echo -e "  ${BOLD}PROCHAINES ETAPES${NC}"
     echo -e "    1. Ouvrir l'URL ci-dessus dans le navigateur"
@@ -1632,6 +2705,7 @@ main() {
     # Phase 5: Post-Installation
     log_step 5 "Post-Installation & Monitoring"
     setup_backup
+    setup_git_versioning
     setup_docker_cleanup
     setup_security_check_script
     setup_logrotate
