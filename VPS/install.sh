@@ -839,9 +839,24 @@ setup_searxng() {
         return 0
     fi
 
-    # Remove stopped container if exists
+    # Remove stopped/failed container if exists
     if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q "^searxng$"; then
+        log_info "Removing stopped SearXNG container..."
         run_cmd docker rm -f searxng
+    fi
+
+    # Check if the port is already in use by something else
+    if ss -tlnp 2>/dev/null | grep -q ":${SEARXNG_PORT} "; then
+        log_warn "Port ${SEARXNG_PORT} is already in use. Checking what is using it..."
+        local pid
+        pid=$(ss -tlnp 2>/dev/null | grep ":${SEARXNG_PORT} " | grep -oP 'pid=\K[0-9]+' | head -1)
+        if [[ -n "$pid" ]]; then
+            local pname
+            pname=$(ps -p "$pid" -o comm= 2>/dev/null || echo "unknown")
+            log_warn "Port ${SEARXNG_PORT} is used by PID ${pid} (${pname})"
+        fi
+        log_warn "SearXNG cannot start. Free port ${SEARXNG_PORT} or change SEARXNG_PORT and re-run."
+        return 1
     fi
 
     log_info "Starting SearXNG (private search engine)..."
@@ -862,7 +877,14 @@ setup_searxng() {
         --security-opt no-new-privileges:true \
         searxng/searxng:latest
 
-    log_success "SearXNG running on localhost:${SEARXNG_PORT}"
+    # Wait briefly and verify container is actually running
+    sleep 2
+    if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^searxng$"; then
+        log_success "SearXNG running on localhost:${SEARXNG_PORT}"
+    else
+        log_error "SearXNG container failed to start. Check: docker logs searxng"
+        return 1
+    fi
 }
 
 setup_sandbox_images() {
