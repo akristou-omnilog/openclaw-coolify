@@ -995,14 +995,32 @@ install_extra_tools() {
 }
 
 install_openclaw() {
-    if sudo -u "${OPENCLAW_USER}" bash -c 'command -v openclaw' &>/dev/null; then
+    local user_home
+    user_home=$(eval echo ~"${OPENCLAW_USER}")
+
+    if sudo -u "${OPENCLAW_USER}" bash -c "export PATH=\"${user_home}/.npm-global/bin:\$PATH\" && command -v openclaw" &>/dev/null; then
         log_info "OpenClaw already installed. Skipping."
         return 0
     fi
 
     log_info "Installing OpenClaw..."
-    run_cmd sudo -u "${OPENCLAW_USER}" bash -c 'npm install -g openclaw@latest'
-    log_success "OpenClaw installed ($(sudo -u "${OPENCLAW_USER}" bash -c 'openclaw --version 2>/dev/null || echo "latest"'))"
+
+    # Configure npm global prefix in user's home to avoid /usr/lib permission issues
+    run_cmd sudo -u "${OPENCLAW_USER}" mkdir -p "${user_home}/.npm-global"
+    run_cmd sudo -u "${OPENCLAW_USER}" bash -c "npm config set prefix '${user_home}/.npm-global'"
+    run_cmd sudo -u "${OPENCLAW_USER}" bash -c "export PATH=\"${user_home}/.npm-global/bin:\$PATH\" && npm install -g openclaw@latest"
+
+    # Add npm-global/bin to user's PATH permanently
+    if ! grep -q '.npm-global/bin' "${user_home}/.profile" 2>/dev/null; then
+        echo 'export PATH="$HOME/.npm-global/bin:$PATH"' | sudo -u "${OPENCLAW_USER}" tee -a "${user_home}/.profile" > /dev/null
+    fi
+
+    # Create symlink in /usr/local/bin so systemd and other users can find it
+    if [[ -f "${user_home}/.npm-global/bin/openclaw" ]]; then
+        ln -sf "${user_home}/.npm-global/bin/openclaw" /usr/local/bin/openclaw
+    fi
+
+    log_success "OpenClaw installed ($(sudo -u "${OPENCLAW_USER}" bash -c "export PATH=\"${user_home}/.npm-global/bin:\$PATH\" && openclaw --version 2>/dev/null || echo 'latest'"))"
 }
 
 configure_openclaw() {
@@ -1169,9 +1187,11 @@ setup_systemd_service() {
     local user_home
     user_home=$(eval echo ~"${OPENCLAW_USER}")
 
-    # Find openclaw binary path
-    local openclaw_bin
-    openclaw_bin=$(sudo -u "${OPENCLAW_USER}" bash -c 'which openclaw 2>/dev/null' || echo "/usr/local/bin/openclaw")
+    # Find openclaw binary path (check symlink in /usr/local/bin first, then npm-global)
+    local openclaw_bin="/usr/local/bin/openclaw"
+    if [[ ! -f "$openclaw_bin" ]]; then
+        openclaw_bin="${user_home}/.npm-global/bin/openclaw"
+    fi
 
     log_info "Creating systemd service..."
     run_cmd tee "$service_file" > /dev/null <<EOF
