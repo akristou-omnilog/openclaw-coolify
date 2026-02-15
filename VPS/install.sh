@@ -543,7 +543,12 @@ PermitEmptyPasswords no
 Port ${SSH_PORT}
 EOF
 
-    run_cmd systemctl restart sshd
+    # Ubuntu 24.04 uses 'ssh', older Ubuntu/Debian use 'sshd'
+    if systemctl list-units --type=service --all | grep -q 'ssh\.service'; then
+        run_cmd systemctl restart ssh
+    else
+        run_cmd systemctl restart sshd
+    fi
     log_success "SSH hardened (port ${SSH_PORT}, key-only, root disabled)"
 }
 
