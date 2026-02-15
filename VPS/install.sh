@@ -37,7 +37,7 @@ readonly DEFAULT_USER="openclaw"
 readonly DEFAULT_SSH_PORT=22
 readonly DEFAULT_SWAP_SIZE="2G"
 readonly DEFAULT_GATEWAY_PORT=18789
-readonly SEARXNG_PORT=8080
+readonly SEARXNG_PORT=8888  # Avoid 8080 conflict with CrowdSec LAPI
 readonly NODE_MAJOR=22
 
 # =============================================================================
