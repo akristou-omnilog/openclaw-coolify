@@ -106,7 +106,7 @@ confirm() {
         return 0
     fi
     local prompt="${1:-Continue?}"
-    echo -en "${YELLOW}${prompt} [y/N]: ${NC}"
+    echo -en "${YELLOW}${prompt} [y/N]: ${NC}" >&2
     read -r response
     [[ "$response" =~ ^[Yy]$ ]]
 }
@@ -122,9 +122,9 @@ prompt_value() {
     fi
 
     if [[ -n "$default" ]]; then
-        echo -en "${BLUE}${prompt}${NC} [${MUTED}${default}${NC}]: "
+        echo -en "${BLUE}${prompt}${NC} [${MUTED}${default}${NC}]: " >&2
     else
-        echo -en "${BLUE}${prompt}${NC}: "
+        echo -en "${BLUE}${prompt}${NC}: " >&2
     fi
     read -r result
     echo "${result:-$default}"
@@ -139,9 +139,9 @@ prompt_secret() {
         return
     fi
 
-    echo -en "${BLUE}${prompt}${NC} (Enter to skip): "
+    echo -en "${BLUE}${prompt}${NC} (Enter to skip): " >&2
     read -rs result
-    echo ""
+    echo "" >&2
     echo "$result"
 }
 
