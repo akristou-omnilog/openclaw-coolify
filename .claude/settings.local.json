@@ -7,7 +7,9 @@
       "Bash(ls:*)",
       "Bash(wc:*)",
       "Bash(xargs cat:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(du:*)",
+      "Bash(bash -n d:/Repos/openclaw-coolify/VPS/install.sh)"
     ]
   }
 }
